@@ -71,6 +71,8 @@ main(int argc, char **argv)
   int disable_gc = 0;
   int disable_snapshots = 0;
   vector<string> logfiles;
+  vector<string> log_backup_hosts;
+  int log_start_port = 0;
   vector<vector<unsigned>> assignments;
   string stats_server_sockfile;
   while (1) {
@@ -94,6 +96,8 @@ main(int argc, char **argv)
       {"numa-memory"                , required_argument , 0                          , 'm'} , // implies --pin-cpus
       {"logfile"                    , required_argument , 0                          , 'l'} ,
       {"assignment"                 , required_argument , 0                          , 'a'} ,
+      {"log-backup-hosts"           , required_argument , 0                          , 'k'} ,
+      {"log-start-port"             , required_argument , 0                          , 'p'} ,
       {"log-nofsync"                , no_argument       , &nofsync                   , 1}   ,
       {"log-compress"               , no_argument       , &do_compress               , 1}   ,
       {"log-fake-writes"            , no_argument       , &fake_writes               , 1}   ,
@@ -105,7 +109,7 @@ main(int argc, char **argv)
       {0, 0, 0, 0}
     };
     int option_index = 0;
-    int c = getopt_long(argc, argv, "b:s:t:d:B:f:r:n:o:m:l:a:x:", long_options, &option_index);
+    int c = getopt_long(argc, argv, "b:s:t:d:B:f:r:n:o:m:l:a:k:x:", long_options, &option_index);
     if (c == -1)
       break;
 
@@ -177,6 +181,15 @@ main(int argc, char **argv)
     case 'a':
       assignments.emplace_back(
           ParseCSVString<unsigned, RangeAwareParser<unsigned>>(optarg));
+      break;
+
+    case 'k':
+      log_backup_hosts.emplace_back(optarg);
+      break;
+
+    case 'p':
+      log_start_port = strtoul(optarg, NULL, 10);
+      ALWAYS_ASSERT(log_start_port > 0);
       break;
 
     case 'x':
@@ -302,7 +315,7 @@ main(int argc, char **argv)
   } else if (db_type == "kvdb-st") {
     db = new kvdb_wrapper<false>;
   } else if (db_type == "mbta") {
-    db = new mbta_wrapper;
+    db = new mbta_wrapper(nthreads, log_backup_hosts, log_start_port);
   } else
     ALWAYS_ASSERT(false);
 
@@ -360,9 +373,12 @@ main(int argc, char **argv)
     }
     cerr << "  logfiles : " << logfiles                     << endl;
     cerr << "  assignments : " << assignments               << endl;
+    cerr << "  log-backup-hosts : " << log_backup_hosts     << endl;
+    cerr << "  log-start-port : " << log_start_port         << endl;
     cerr << "  disable-gc : " << disable_gc                 << endl;
     cerr << "  disable-snapshots : " << disable_snapshots   << endl;
-    cerr << "  stats-server-sockfile: " << stats_server_sockfile << endl;
+    cerr << "  stats-server-sockfile : " << stats_server_sockfile << endl;
+    cerr << "  use-hashtable : " << use_hashtable << endl;
 
     cerr << "system properties:" << endl;
     cerr << "  btree_internal_node_size: " << concurrent_btree::InternalNodeSize() << endl;

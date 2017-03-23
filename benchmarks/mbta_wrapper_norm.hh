@@ -37,7 +37,13 @@ class mbta_wrapper;
 
 class mbta_ordered_index : public abstract_ordered_index {
 public:
-  mbta_ordered_index(const std::string &name, mbta_wrapper *db) : mbta(), name(name), db(db) {}
+  mbta_ordered_index(const std::string &name, uint64_t id, mbta_wrapper *db) : mbta(), name(name), db(db), id(id) {
+    Transaction::register_object(mbta, id);
+  }
+
+  ~mbta_ordered_index() {
+    Transaction::unregister_object(mbta);
+  }
 
   std::string *arena(void);
 
@@ -131,6 +137,8 @@ mbta_type mbta;
 const std::string name;
 
 mbta_wrapper *db;
+
+uint64_t id;
 
 };
 
@@ -798,7 +806,31 @@ private:
 
 
 class mbta_wrapper : public abstract_db {
+  bool allocated_threads[32];
+  bool logging_enabled;
+  int nthreads;
+  std::mutex index_mu;
+
 public:
+  mbta_wrapper(int nthreads, std::vector<std::string> log_backup_hosts, int log_start_port) :
+    allocated_threads(), logging_enabled(), nthreads(nthreads), index_mu() {
+
+    if (log_start_port > 0) {
+      logging_enabled = true;
+      printf("Connecting to %lu backups\n", log_backup_hosts.size());
+      ALWAYS_ASSERT(!Transaction::init_logging(nthreads, log_backup_hosts, log_start_port));
+      for (int i = 0; i < nthreads; i++) {
+        LogSend::set_active(false, i);
+      }
+    }
+      // someone has to do this (they don't provide us with a general init callback)
+      mbta_ordered_index::mbta_type::static_init();
+      // need this too
+      pthread_t advancer;
+      pthread_create(&advancer, NULL, Transaction::epoch_advancer, NULL);
+      pthread_detach(advancer);
+  }
+
   ssize_t txn_max_batch_size() const OVERRIDE { return 100; }
   
   void
@@ -829,23 +861,29 @@ public:
   void
   thread_init(bool loader)
   {
-    static int tidcounter = 0;
-    TThread::set_id(__sync_fetch_and_add(&tidcounter, 1));
-    if (TThread::id() == 0) {
-      // someone has to do this (they don't provide us with a general init callback)
-      mbta_ordered_index::mbta_type::static_init();
-      // need this too
-      pthread_t advancer;
-      pthread_create(&advancer, NULL, Transaction::epoch_advancer, NULL);
-      pthread_detach(advancer);
+    // hack to reuse thread IDs, the logger expects worker threads to be numbered from 0 to nthreads-1
+    for (int i = 0; ; i++) {
+      if (__sync_bool_compare_and_swap(&allocated_threads[i % 32], false, true)) {
+        if (i >= nthreads)
+          throw std::string("Too few logging threads!");
+        TThread::set_id(i);
+        break;
+      }
     }
+
     mbta_ordered_index::mbta_type::thread_init();
+    if (logging_enabled)
+      LogSend::set_active(true, TThread::id());
   }
 
   void
   thread_end()
   {
-
+    if (logging_enabled) {
+      Transaction::flush_log_batch();
+      LogSend::set_active(false, TThread::id());
+    }
+    ALWAYS_ASSERT(__sync_bool_compare_and_swap(&allocated_threads[TThread::id()], true, false));
   }
 
   size_t
@@ -878,26 +916,36 @@ public:
              size_t value_size_hint,
 	     bool mostly_append = false,
              bool use_hashtable = false) {
+    std::unique_lock<std::mutex> lk(index_mu);
     if (use_hashtable) {
       if (name.find("customer") == 0) 
         return new ht_ordered_index_customer_key(name, this);
       if (name.find("history") == 0)
-	return new ht_ordered_index_history_key(name, this);
+        return new ht_ordered_index_history_key(name, this);
       if (name.find("oorder") == 0)
-	return new ht_ordered_index_oorder_key(name, this);
+        return new ht_ordered_index_oorder_key(name, this);
       if (name.find("stock") == 0)
         return new ht_ordered_index_stock_key(name, this);
       return new ht_ordered_index_int(name, this);
     }
-    auto ret = new mbta_ordered_index(name, this);
-    return ret;
+    std::vector<std::string> id_to_name = {
+      "customer", "customer_name_idx", "district",
+      "history", "item", "new_order",
+      "oorder", "oorder_c_id_idx", "order_line",
+      "stock", "stock_data", "warehouse"
+    };
+    for (unsigned i = 0; i < id_to_name.size(); i++) {
+      if (name == id_to_name[i])
+        return new mbta_ordered_index(name, i, this);
+    }
+    throw std::string("Index name not found");
   }
 
  void
  close_index(abstract_ordered_index *idx) {
+   std::unique_lock<std::mutex> lk(index_mu);
    delete idx;
  }
-
 };
 
 __thread str_arena* mbta_wrapper::thr_arena;
