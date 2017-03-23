@@ -809,11 +809,12 @@ class mbta_wrapper : public abstract_db {
   bool allocated_threads[32];
   bool logging_enabled;
   int nthreads;
+  int active_threads;
   std::mutex index_mu;
 
 public:
   mbta_wrapper(int nthreads, std::vector<std::string> log_backup_hosts, int log_start_port) :
-    allocated_threads(), logging_enabled(), nthreads(nthreads), index_mu() {
+    allocated_threads(), logging_enabled(), nthreads(nthreads), active_threads(), index_mu() {
 
     if (log_start_port > 0) {
       logging_enabled = true;
@@ -861,12 +862,14 @@ public:
   void
   thread_init(bool loader)
   {
+    if (__sync_fetch_and_add(&active_threads, 1) >= nthreads)
+          throw std::string("Too few logging threads!");
+
     // hack to reuse thread IDs, the logger expects worker threads to be numbered from 0 to nthreads-1
     for (int i = 0; ; i++) {
-      if (__sync_bool_compare_and_swap(&allocated_threads[i % 32], false, true)) {
-        if (i >= nthreads)
-          throw std::string("Too few logging threads!");
-        TThread::set_id(i);
+      int threadid = i % nthreads;
+      if (__sync_bool_compare_and_swap(&allocated_threads[threadid], false, true)) {
+        TThread::set_id(threadid);
         break;
       }
     }
@@ -884,6 +887,7 @@ public:
       LogSend::set_active(false, TThread::id());
     }
     ALWAYS_ASSERT(__sync_bool_compare_and_swap(&allocated_threads[TThread::id()], true, false));
+    __sync_fetch_and_add(&active_threads, -1);
   }
 
   size_t
