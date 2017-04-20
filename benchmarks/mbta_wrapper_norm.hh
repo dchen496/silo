@@ -832,6 +832,12 @@ public:
       pthread_detach(advancer);
   }
 
+  ~mbta_wrapper() {
+    if (logging_enabled){
+      Transaction::stop_logging();
+    }
+  }
+
   ssize_t txn_max_batch_size() const OVERRIDE { return 100; }
   
   void
