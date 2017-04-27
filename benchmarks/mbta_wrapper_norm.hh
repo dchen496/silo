@@ -868,21 +868,26 @@ public:
   void
   thread_init(bool loader)
   {
-    if (__sync_fetch_and_add(&active_threads, 1) >= nthreads)
-          throw std::string("Too few logging threads!");
-
-    // hack to reuse thread IDs, the logger expects worker threads to be numbered from 0 to nthreads-1
-    for (int i = 0; ; i++) {
-      int threadid = i % nthreads;
-      if (__sync_bool_compare_and_swap(&allocated_threads[threadid], false, true)) {
-        TThread::set_id(threadid);
-        break;
-      }
-    }
-
     mbta_ordered_index::mbta_type::thread_init();
-    if (logging_enabled)
+
+    if (logging_enabled) {
+      // hack to reuse thread IDs, the logger expects worker threads to be numbered from 0 to nthreads-1
+      if (__sync_fetch_and_add(&active_threads, 1) >= nthreads)
+            throw std::string("Too few logging threads!");
+
+      for (int i = 0; ; i++) {
+        int threadid = i % nthreads;
+        if (__sync_bool_compare_and_swap(&allocated_threads[threadid], false, true)) {
+          TThread::set_id(threadid);
+          break;
+        }
+      }
+
+      // another hack...
+
+
       LogSend::set_active(true, TThread::id());
+    }
   }
 
   void
@@ -891,9 +896,9 @@ public:
     if (logging_enabled) {
       Transaction::flush_log_batch();
       LogSend::set_active(false, TThread::id());
+      ALWAYS_ASSERT(__sync_bool_compare_and_swap(&allocated_threads[TThread::id()], true, false));
+      __sync_fetch_and_add(&active_threads, -1);
     }
-    ALWAYS_ASSERT(__sync_bool_compare_and_swap(&allocated_threads[TThread::id()], true, false));
-    __sync_fetch_and_add(&active_threads, -1);
   }
 
   size_t
