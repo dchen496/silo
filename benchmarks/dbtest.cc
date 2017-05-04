@@ -19,6 +19,7 @@
 #include "kvdb_wrapper.h"
 #include "kvdb_wrapper_impl.h"
 #include "mbta_wrapper.hh"
+#include "mbta_backup_wrapper.hh"
 
 using namespace std;
 using namespace util;
@@ -316,6 +317,8 @@ main(int argc, char **argv)
     db = new kvdb_wrapper<false>;
   } else if (db_type == "mbta") {
     db = new mbta_wrapper(nthreads, log_backup_hosts, log_start_port);
+  } else if (db_type == "mbta-backup") {
+    db = new mbta_backup_wrapper(nthreads, log_start_port);
   } else
     ALWAYS_ASSERT(false);
 

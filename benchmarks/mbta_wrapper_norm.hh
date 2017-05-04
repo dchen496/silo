@@ -5,6 +5,7 @@
 #include "sto/Transaction.hh"
 #include "sto/LogProto.hh"
 #include "sto/MassTrans.hh"
+#include "sto/TBox.hh"
 
 #define OP_LOGGING 0
 
@@ -811,11 +812,13 @@ class mbta_wrapper : public abstract_db {
   bool logging_enabled;
   int nthreads;
   int active_threads;
-  std::mutex index_mu;
+  std::mutex mu;
+  bool loading_done;
+  TBox<bool> loading_done_box;
 
 public:
   mbta_wrapper(int nthreads, std::vector<std::string> log_backup_hosts, int log_start_port) :
-    allocated_threads(), logging_enabled(), nthreads(nthreads), active_threads(), index_mu() {
+    allocated_threads(), logging_enabled(), nthreads(nthreads), active_threads(), mu(), loading_done() {
 
     if (log_start_port > 0) {
       logging_enabled = true;
@@ -831,6 +834,7 @@ public:
       pthread_t advancer;
       pthread_create(&advancer, NULL, Transaction::epoch_advancer, NULL);
       pthread_detach(advancer);
+      Transaction::register_object(loading_done_box, 0);
   }
 
   ~mbta_wrapper() {
@@ -885,9 +889,18 @@ public:
       }
 
       // another hack...
-
-
       LogSend::set_active(true, TThread::id());
+    }
+
+    if (logging_enabled) {
+      std::unique_lock<std::mutex> lk(mu);
+      if (!loader && !loading_done) {
+        loading_done = true;
+        Sto::start_transaction();
+        loading_done_box = loading_done;
+        ALWAYS_ASSERT(Sto::try_commit());
+        Transaction::flush_log_batch();
+      }
     }
   }
 
@@ -932,7 +945,7 @@ public:
              size_t value_size_hint,
 	     bool mostly_append = false,
              bool use_hashtable = false) {
-    std::unique_lock<std::mutex> lk(index_mu);
+    std::unique_lock<std::mutex> lk(mu);
     if (use_hashtable) {
       if (name.find("customer") == 0) 
         return new ht_ordered_index_customer_key(name, this);
@@ -944,6 +957,7 @@ public:
         return new ht_ordered_index_stock_key(name, this);
       return new ht_ordered_index_int(name, this);
     }
+    // note that ids start at 1 since we already used 0 for the loading done box
     std::vector<std::string> id_to_name = {
       "customer", "customer_name_idx", "district",
       "history", "item", "new_order",
@@ -952,14 +966,14 @@ public:
     };
     for (unsigned i = 0; i < id_to_name.size(); i++) {
       if (name == id_to_name[i])
-        return new mbta_ordered_index(name, i, this);
+        return new mbta_ordered_index(name, i + 1, this);
     }
     throw std::string("Index name not found");
   }
 
  void
  close_index(abstract_ordered_index *idx) {
-   std::unique_lock<std::mutex> lk(index_mu);
+   std::unique_lock<std::mutex> lk(mu);
    delete idx;
  }
 };

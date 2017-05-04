@@ -167,38 +167,41 @@ void
 bench_runner::run()
 {
   // load data
-  const vector<bench_loader *> loaders = make_loaders();
-  {
-    spin_barrier b(loaders.size());
-    const pair<uint64_t, uint64_t> mem_info_before = get_system_memory_info();
+  vector<bench_loader *> loaders;
+  if (!db->is_read_only_db()) {
+    loaders = make_loaders();
     {
-      scoped_timer t("dataloading", verbose);
-      for (vector<bench_loader *>::const_iterator it = loaders.begin();
-          it != loaders.end(); ++it) {
-        (*it)->set_barrier(b);
-        (*it)->start();
+      spin_barrier b(loaders.size());
+      const pair<uint64_t, uint64_t> mem_info_before = get_system_memory_info();
+      {
+        scoped_timer t("dataloading", verbose);
+        for (vector<bench_loader *>::const_iterator it = loaders.begin();
+            it != loaders.end(); ++it) {
+          (*it)->set_barrier(b);
+          (*it)->start();
+        }
+        for (vector<bench_loader *>::const_iterator it = loaders.begin();
+            it != loaders.end(); ++it)
+          (*it)->join();
       }
-      for (vector<bench_loader *>::const_iterator it = loaders.begin();
-          it != loaders.end(); ++it)
-        (*it)->join();
+      const pair<uint64_t, uint64_t> mem_info_after = get_system_memory_info();
+      const int64_t delta = int64_t(mem_info_before.first) - int64_t(mem_info_after.first); // free mem
+      const double delta_mb = double(delta)/1048576.0;
+      if (verbose)
+        cerr << "DB size: " << delta_mb << " MB" << endl;
     }
-    const pair<uint64_t, uint64_t> mem_info_after = get_system_memory_info();
-    const int64_t delta = int64_t(mem_info_before.first) - int64_t(mem_info_after.first); // free mem
-    const double delta_mb = double(delta)/1048576.0;
-    if (verbose)
-      cerr << "DB size: " << delta_mb << " MB" << endl;
-  }
 
-  db->do_txn_epoch_sync(); // also waits for worker threads to be persisted
-  {
-    const auto persisted_info = db->get_ntxn_persisted();
-    if (get<0>(persisted_info) != get<1>(persisted_info))
-      cerr << "ERROR: " << persisted_info << endl;
-    //ALWAYS_ASSERT(get<0>(persisted_info) == get<1>(persisted_info));
-    if (verbose)
-      cerr << persisted_info << " txns persisted in loading phase" << endl;
+    db->do_txn_epoch_sync(); // also waits for worker threads to be persisted
+    {
+      const auto persisted_info = db->get_ntxn_persisted();
+      if (get<0>(persisted_info) != get<1>(persisted_info))
+        cerr << "ERROR: " << persisted_info << endl;
+      //ALWAYS_ASSERT(get<0>(persisted_info) == get<1>(persisted_info));
+      if (verbose)
+        cerr << persisted_info << " txns persisted in loading phase" << endl;
+    }
+    db->reset_ntxn_persisted();
   }
-  db->reset_ntxn_persisted();
 
   if (!no_reset_counters) {
     event_counter::reset_all_counters(); // XXX: for now - we really should have a before/after loading

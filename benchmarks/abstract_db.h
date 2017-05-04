@@ -133,6 +133,10 @@ public:
 
   virtual void
   close_index(abstract_ordered_index *idx) = 0;
+
+  virtual bool is_read_only_db() {
+    return false;
+  }
 };
 
 #endif /* _ABSTRACT_DB_H_ */
