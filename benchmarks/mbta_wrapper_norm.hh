@@ -3,6 +3,7 @@
 #include "abstract_db.h"
 #include "abstract_ordered_index.h"
 #include "sto/Transaction.hh"
+#include "sto/LogProto.hh"
 #include "sto/MassTrans.hh"
 
 #define OP_LOGGING 0
@@ -819,7 +820,7 @@ public:
     if (log_start_port > 0) {
       logging_enabled = true;
       printf("Connecting to %lu backups\n", log_backup_hosts.size());
-      ALWAYS_ASSERT(!Transaction::init_logging(nthreads, log_backup_hosts, log_start_port));
+      ALWAYS_ASSERT(!LogSend::init_logging(nthreads, log_backup_hosts, log_start_port));
       for (int i = 0; i < nthreads; i++) {
         LogSend::set_active(false, i);
       }
@@ -834,7 +835,7 @@ public:
 
   ~mbta_wrapper() {
     if (logging_enabled){
-      Transaction::stop_logging();
+      LogSend::stop();
     }
   }
 
