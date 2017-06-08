@@ -151,12 +151,14 @@ public:
   void thread_init(bool loader) {
     mbta_ordered_index::mbta_type::thread_init();
 
-    int pin_to = (coreid::core_id() + 8) % 64;
+#if LOG_CPU_PIN
+    int pin_to = (coreid::core_id() + LOG_CPU_PIN) % 64;
     printf("thread id: %d, pin_to: %d\n", coreid::core_id(), pin_to);
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(pin_to, &cpuset);
     pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+#endif
 
     // spin until loading is done
     while (true) {
