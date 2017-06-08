@@ -133,9 +133,9 @@ public:
 
     Transaction::register_object(loading_done_box, 0);
     printf("Listening for primary on ports %d-%d\n", log_start_port, log_start_port + nthreads - 1);
-    listen_thr = std::thread(LogApply::listen, nthreads, log_start_port,
+    listen_thr = std::thread(LogBackup::listen, nthreads, log_start_port,
         std::function<void()>(&::thread_init),
-        std::function<void(uint64_t)>(LogApply::default_apply_idle_fn));
+        std::function<void(uint64_t)>(LogBackup::default_apply_idle_fn));
   }
 
   ~mbta_backup_wrapper() {
@@ -150,6 +150,13 @@ public:
 
   void thread_init(bool loader) {
     mbta_ordered_index::mbta_type::thread_init();
+
+    int pin_to = (coreid::core_id() + 8) % 64;
+    printf("thread id: %d, pin_to: %d\n", coreid::core_id(), pin_to);
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(pin_to, &cpuset);
+    pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
 
     // spin until loading is done
     while (true) {
@@ -177,9 +184,9 @@ public:
                 TxnProfileHint hint = HINT_DEFAULT) {
     // spin until we are idle
     fence();
-    while (LogApply::apply_state != LogApply::ApplyState::IDLE) {
+    while (LogBackup::apply_state != LogBackup::ApplyState::IDLE) {
       fence();
-      usleep(10);
+      usleep(1000);
     }
     acquire_fence();
 

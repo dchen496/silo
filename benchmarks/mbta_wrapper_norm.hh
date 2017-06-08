@@ -823,9 +823,9 @@ public:
     if (log_start_port > 0) {
       logging_enabled = true;
       printf("Connecting to %lu backups\n", log_backup_hosts.size());
-      ALWAYS_ASSERT(!LogSend::init_logging(nthreads, log_backup_hosts, log_start_port));
+      ALWAYS_ASSERT(!LogPrimary::init_logging(nthreads, log_backup_hosts, log_start_port));
       for (int i = 0; i < nthreads; i++) {
-        LogSend::set_active(false, i);
+        LogPrimary::set_active(false, i);
       }
     }
       // someone has to do this (they don't provide us with a general init callback)
@@ -839,7 +839,7 @@ public:
 
   ~mbta_wrapper() {
     if (logging_enabled){
-      LogSend::stop();
+      LogPrimary::stop();
     }
   }
 
@@ -889,7 +889,7 @@ public:
       }
 
       // another hack...
-      LogSend::set_active(true, TThread::id());
+      LogPrimary::set_active(true, TThread::id());
     }
 
     if (logging_enabled) {
@@ -909,7 +909,7 @@ public:
   {
     if (logging_enabled) {
       Transaction::flush_log_batch();
-      LogSend::set_active(false, TThread::id());
+      LogPrimary::set_active(false, TThread::id());
       ALWAYS_ASSERT(__sync_bool_compare_and_swap(&allocated_threads[TThread::id()], true, false));
       __sync_fetch_and_add(&active_threads, -1);
     }
