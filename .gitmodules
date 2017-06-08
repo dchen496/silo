@@ -3,4 +3,4 @@
 	url = git://github.com/kohler/masstree-beta.git
 [submodule "benchmarks/sto"]
 	path = benchmarks/sto
-	url = git@github.com:nathanielherman/sto.git
+	url = git@github.com:dchen496/sto.git
